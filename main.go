@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"flag"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"os"
 	"path/filepath"
@@ -53,13 +55,20 @@ func renderTemplate(src, dst string, vals interface{}) error {
 		return fmt.Errorf("parsing file %s: %w", src, err)
 	}
 
+	buf := bytes.NewBuffer([]byte{})
+	tpl.Option("missingkey=error")
+	if err := tpl.Execute(buf, vals); err != nil {
+		return fmt.Errorf("executing template %s: %w", src, err)
+	}
+
 	f, err := os.Create(dst)
 	if err != nil {
 		return fmt.Errorf("creating file %s: %w", dst, err)
 	}
 
-	if err := tpl.Execute(f, vals); err != nil {
-		return fmt.Errorf("executing template %s: %w", src, err)
+	if _, err := io.Copy(f, buf); err != nil {
+		return fmt.Errorf("writing to %s: %w", dst, err)
 	}
+
 	return nil
 }
