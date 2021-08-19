@@ -12,13 +12,13 @@ import (
 	"text/template"
 )
 
-type valueFlags map[string]string
+type fileValueFlags map[string]string
 
-func (i valueFlags) String() string {
+func (i fileValueFlags) String() string {
 	return "valueFlags containing named parameters and their values"
 }
 
-func (i valueFlags) Set(val string) error {
+func (i fileValueFlags) Set(val string) error {
 	split := strings.Split(val, "=")
 	if len(split) != 2 {
 		return errors.New("value must be formatted like name=/path/to/file")
@@ -31,6 +31,21 @@ func (i valueFlags) Set(val string) error {
 	return nil
 }
 
+type valueFlags map[string]string
+
+func (i valueFlags) String() string {
+	return "valueFlags containing named parameters and their values"
+}
+
+func (i valueFlags) Set(val string) error {
+	split := strings.Split(val, "=")
+	if len(split) != 2 {
+		return errors.New("value must be formatted like name=value")
+	}
+	i[split[0]] = split[1]
+	return nil
+}
+
 func main() {
 	if err := run(); err != nil {
 		log.Fatal(err)
@@ -39,12 +54,21 @@ func main() {
 
 func run() error {
 	values := make(valueFlags)
-	flag.Var(&values, "val", "named values from the input file pointing to files containing the data to be filled in. Ex: myval=/secrets/myval")
+	fileValues := make(fileValueFlags)
+	flag.Var(&values, "val", "key/value pair of parameter name to value ex: color=red")
+	flag.Var(&fileValues, "val-file", "key/value pair of parameter name to path to file containing the value ex: myval=/secrets/myval")
 	inFile := flag.String("in", "", "template file to be rendered")
 	flag.Parse()
 
 	if *inFile == "" {
 		return errors.New("required flag -in")
+	}
+
+	for k, v := range fileValues {
+		if _, ok := values[k]; ok {
+			return fmt.Errorf("parameter %s set in both -val and -val-file", k)
+		}
+		values[k] = v
 	}
 
 	if err := renderTemplate(*inFile, values, os.Stdout); err != nil {
