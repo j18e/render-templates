@@ -1,74 +1,67 @@
 package main
 
 import (
-	"bytes"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"io/ioutil"
+	"log"
 	"os"
-	"path/filepath"
 	"strings"
 	"text/template"
-
-	log "github.com/sirupsen/logrus"
-	"gopkg.in/yaml.v2"
 )
 
-func main() {
-	valsFile := flag.String("f", "", "values file for rendering template")
-	flag.Parse()
+type valueFlags map[string]string
 
-	if *valsFile == "" {
-		log.Fatal("required flag -f")
+func (i valueFlags) String() string {
+	return "valueFlags containing named parameters and their values"
+}
+
+func (i valueFlags) Set(val string) error {
+	split := strings.Split(val, "=")
+	if len(split) != 2 {
+		return errors.New("value must be formatted like name=/path/to/file")
 	}
-
-	var tplFiles []string
-	filepath.Walk(".", func(path string, f os.FileInfo, err error) error {
-		if !f.IsDir() && strings.HasSuffix(path, ".tpl") {
-			tplFiles = append(tplFiles, path)
-		}
-		return nil
-	})
-	log.Infof("found %d template files", len(tplFiles))
-
-	bs, err := ioutil.ReadFile(*valsFile)
+	bs, err := ioutil.ReadFile(split[1])
 	if err != nil {
-		log.Fatalf("reading values file: %v", err)
+		return fmt.Errorf("reading value file %s: %w", split[0], err)
 	}
-	var values interface{}
-	if err := yaml.Unmarshal(bs, &values); err != nil {
-		log.Fatalf("unmarshaling yaml values file: %v", err)
-	}
+	i[split[0]] = strings.TrimSpace(string(bs))
+	return nil
+}
 
-	for _, path := range tplFiles {
-		log.Infof("rendering %s", path)
-		if err := renderTemplate(path, strings.TrimSuffix(path, ".tpl"), values); err != nil {
-			log.Error(err)
-		}
+func main() {
+	if err := run(); err != nil {
+		log.Fatal(err)
 	}
 }
 
-func renderTemplate(src, dst string, vals interface{}) error {
+func run() error {
+	values := make(valueFlags)
+	flag.Var(&values, "val", "named values from the input file pointing to files containing the data to be filled in. Ex: myval=/secrets/myval")
+	inFile := flag.String("in", "", "template file to be rendered")
+	flag.Parse()
+
+	if *inFile == "" {
+		return errors.New("required flag -in")
+	}
+
+	if err := renderTemplate(*inFile, values, os.Stdout); err != nil {
+		return err
+	}
+	return nil
+}
+
+func renderTemplate(src string, data valueFlags, outFile io.Writer) error {
 	tpl, err := template.ParseFiles(src)
 	if err != nil {
 		return fmt.Errorf("parsing file %s: %w", src, err)
 	}
 
-	buf := bytes.NewBuffer([]byte{})
 	tpl.Option("missingkey=error")
-	if err := tpl.Execute(buf, vals); err != nil {
+	if err := tpl.Execute(outFile, data); err != nil {
 		return fmt.Errorf("executing template %s: %w", src, err)
 	}
-
-	f, err := os.Create(dst)
-	if err != nil {
-		return fmt.Errorf("creating file %s: %w", dst, err)
-	}
-
-	if _, err := io.Copy(f, buf); err != nil {
-		return fmt.Errorf("writing to %s: %w", dst, err)
-	}
-
 	return nil
 }
